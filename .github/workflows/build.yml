@@ -1,16 +1,11 @@
-name: Build Flare Web (zh-TW, optimized)
+name: Build Flare Web
 
 on:
+  push:
+    branches: [ main ]
+    paths-ignore:
+      - '**.md'
   workflow_dispatch:
-    inputs:
-      keep_music:
-        description: 'Keep music files (true/false)'
-        required: false
-        default: 'true'
-      keep_other_languages:
-        description: 'Keep non-zh translations (true/false)'
-        required: false
-        default: 'false'
 
 permissions:
   contents: write
@@ -36,14 +31,14 @@ jobs:
           ref: master
           path: flare-game
 
-      - name: Show translation status
+      - name: Show zh_TW translation status
         run: |
           echo "=== zh_TW translation files ==="
           ls -la flare-game/mods/fantasycore/languages/data.zh_TW.po || true
           ls -la flare-game/mods/empyrean_campaign/languages/data.zh_TW.po || true
           ls -la flare-engine/mods/default/languages/engine.zh_TW.po || true
           echo ""
-          echo "=== mod sizes BEFORE optimization ==="
+          echo "=== mod sizes BEFORE ==="
           du -sh flare-game/mods/* 2>/dev/null || true
 
       - name: Optimize game data
@@ -60,12 +55,10 @@ jobs:
 
           echo ""
           echo "=== 2. Remove non-Chinese translations ==="
-          if [ "${{ github.event.inputs.keep_other_languages }}" != "true" ]; then
-            BEFORE=$(du -sm . | cut -f1)
-            find . -path "*/languages/*.po" -type f ! -name "*.zh_TW.po" ! -name "*.zh.po" ! -name "*.pot" -delete
-            AFTER=$(du -sm . | cut -f1)
-            echo "  languages: ${BEFORE}MB -> ${AFTER}MB"
-          fi
+          BEFORE=$(du -sm . | cut -f1)
+          find . -path "*/languages/*.po" -type f ! -name "*.zh_TW.po" ! -name "*.zh.po" ! -name "*.pot" -delete
+          AFTER=$(du -sm . | cut -f1)
+          echo "  languages: ${BEFORE}MB -> ${AFTER}MB"
 
           echo ""
           echo "=== 3. Remove heavy unused fonts ==="
@@ -75,20 +68,11 @@ jobs:
               find . -name "$f" -type f -delete
             fi
           done
-          echo "  kept Chinese-capable fonts:"
-          find . -path "*/fonts/*" -name "*.ttf" -exec ls -la {} \; 2>/dev/null | awk '{print "    " $5 " " $9}' || true
+          echo "  remaining fonts:"
+          find . -path "*/fonts/*" -name "*.ttf" -exec ls -la {} \; 2>/dev/null || true
 
           echo ""
-          echo "=== 4. Music handling ==="
-          if [ "${{ github.event.inputs.keep_music }}" != "true" ]; then
-            echo "  removing all music"
-            find . -path "*/music/*" -type f -delete
-          else
-            echo "  keeping music"
-          fi
-
-          echo ""
-          echo "=== mod sizes AFTER optimization ==="
+          echo "=== mod sizes AFTER ==="
           du -sh ./* 2>/dev/null || true
           echo ""
           echo "TOTAL: $(du -sm . | cut -f1) MB"
@@ -120,32 +104,31 @@ jobs:
       - name: Add deployment notes
         run: |
           cd flare-engine/emscripten
-          cat > README.txt <<'EOF'
-Flare: Empyrean Campaign - Traditional Chinese Web Version
-==========================================================
+          cat > README.txt << "EOF"
+          Flare: Empyrean Campaign - Traditional Chinese Web Version
+          ==========================================================
 
-HOW TO DEPLOY
-  Copy all files in this directory to your web server directory.
+          HOW TO DEPLOY
+            Copy all files in this directory to your web server directory.
 
-REQUIRED APACHE CONFIG
-  AddType application/wasm .wasm
-  AddType application/octet-stream .data
+          REQUIRED APACHE CONFIG
+            AddType application/wasm .wasm
+            AddType application/octet-stream .data
 
-IN-GAME LANGUAGE
-  After starting the game, go to Options -> Interface -> Language
-  and select "zh_TW" for Traditional Chinese.
+          IN-GAME LANGUAGE
+            After starting the game, go to Options -> Interface -> Language
+            and select zh_TW for Traditional Chinese.
 
-LICENSES
-  Flare Engine           - GPLv3
-  Empyrean Campaign data - CC-BY-SA 3.0
-  Traditional Chinese    - CC-BY-SA 3.0 (derived from upstream)
+          LICENSES
+            Flare Engine           - GPLv3
+            Empyrean Campaign data - CC-BY-SA 3.0
+            Traditional Chinese    - CC-BY-SA 3.0 (derived from upstream)
 
-SOURCE
-  Engine: https://github.com/flareteam/flare-engine
-  Game:   https://github.com/flareteam/flare-game
-EOF
+          SOURCE
+            Engine: https://github.com/flareteam/flare-engine
+            Game:   https://github.com/flareteam/flare-game
+          EOF
           echo "README.txt created"
-          ls -la README.txt
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
