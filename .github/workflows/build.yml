@@ -13,7 +13,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
 
     steps:
       - name: Checkout flare-engine
@@ -37,9 +37,6 @@ jobs:
           ls -la flare-game/mods/fantasycore/languages/data.zh_TW.po || true
           ls -la flare-game/mods/empyrean_campaign/languages/data.zh_TW.po || true
           ls -la flare-engine/mods/default/languages/engine.zh_TW.po || true
-          echo ""
-          echo "=== mod sizes BEFORE ==="
-          du -sh flare-game/mods/* 2>/dev/null || true
 
       - name: Optimize game data
         run: |
@@ -47,35 +44,48 @@ jobs:
 
           echo "=== 1. Remove unused mods ==="
           for m in alpha_demo devlab minicore minicore_alpha centered_statbars; do
-            if [ -d "$m" ]; then
-              echo "  removing $m"
-              rm -rf "$m"
-            fi
+            [ -d "$m" ] && rm -rf "$m" && echo "  removed $m"
           done
 
-          echo ""
           echo "=== 2. Remove non-Chinese translations ==="
-          BEFORE=$(du -sm . | cut -f1)
           find . -path "*/languages/*.po" -type f ! -name "*.zh_TW.po" ! -name "*.zh.po" ! -name "*.pot" -delete
-          AFTER=$(du -sm . | cut -f1)
-          echo "  languages: ${BEFORE}MB -> ${AFTER}MB"
 
-          echo ""
           echo "=== 3. Remove heavy unused fonts ==="
           for f in NotoSerifKR-Regular.ttf NotoSerifDevanagari-Regular.ttf NotoSerifThai-Regular.ttf; do
-            if find . -name "$f" -type f | grep -q .; then
-              echo "  removing $f"
-              find . -name "$f" -type f -delete
-            fi
+            find . -name "$f" -type f -delete 2>/dev/null || true
           done
-          echo "  remaining fonts:"
-          find . -path "*/fonts/*" -name "*.ttf" -exec ls -la {} \; 2>/dev/null || true
 
           echo ""
-          echo "=== mod sizes AFTER ==="
-          du -sh ./* 2>/dev/null || true
-          echo ""
           echo "TOTAL: $(du -sm . | cut -f1) MB"
+
+      - name: Patch engine default language to zh_TW
+        run: |
+          cd flare-engine
+          echo "=== BEFORE ==="
+          grep -n 'setConfigDefault(17' src/Settings.cpp || true
+          grep -n 'setup_language' src/Settings.cpp || true
+
+          echo ""
+          echo "=== 修改 language 預設值 en -> zh_TW ==="
+          sed -i 's/\(setConfigDefault(17, "language",[^,]*,[^,]*, *\)"en"/\1"zh_TW"/' src/Settings.cpp
+
+          echo ""
+          echo "=== 修改 setup_language 預設值 0 -> 1（跳過語言對話框）==="
+          sed -i 's/\(setConfigDefault(53, "setup_language",[^,]*,[^,]*, *\)"0"/\1"1"/' src/Settings.cpp
+
+          echo ""
+          echo "=== AFTER ==="
+          grep -n 'setConfigDefault(17' src/Settings.cpp || true
+          grep -n 'setConfigDefault(53' src/Settings.cpp || true
+
+          echo ""
+          echo "=== 驗證修改成功 ==="
+          if grep -q 'setConfigDefault(17, "language".*"zh_TW"' src/Settings.cpp; then
+            echo "  OK: language default = zh_TW"
+          else
+            echo "  FAIL: language default 未修改"
+            exit 1
+          fi
 
       - name: Setup Emscripten
         uses: mymindstorm/setup-emsdk@v14
@@ -92,43 +102,46 @@ jobs:
       - name: Inspect build output
         run: |
           cd flare-engine/emscripten
-          echo "=== build artifacts ==="
           ls -lah
-          echo ""
-          echo "=== size breakdown ==="
-          du -sh index.* 2>/dev/null
-          echo ""
-          echo "=== TOTAL BUILD SIZE ==="
-          du -sh . | cut -f1
+          echo "=== size ==="
+          du -sh index.*
+
+      - name: Localize loading screen
+        run: |
+          cd flare-engine/emscripten
+          python3 - << "PYEOF"
+          import re
+          p = "index.html"
+          s = open(p, encoding="utf-8").read()
+          s = s.replace("<html>", '<html lang="zh-Hant">', 1)
+          if "<title>" not in s:
+              s = s.replace("<head>", '<head>\n    <title>星海征途 Empyrean Campaign — 繁體中文 RPG</title>', 1)
+          s = s.replace(">Loading...<", ">載入中…<")
+          s = s.replace('"Downloading data... "', '"載入遊戲資源… "')
+          # 加入 16:9 置中排版
+          s = s.replace("body {\n\t\tbackground:#000;\n\t\tcolor: #fff;\n\t}",
+                        "html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#000;color:#fff;}body{display:flex;align-items:center;justify-content:center;}")
+          s = s.replace("height: 100%;", "max-width:100%;max-height:100%;width:auto;height:auto;aspect-ratio:16/9;")
+          open(p, "w", encoding="utf-8").write(s)
+          print("index.html localized")
+          PYEOF
+          grep -c "載入" index.html || true
 
       - name: Add deployment notes
         run: |
           cd flare-engine/emscripten
-          cat > README.txt << "EOF"
+          cat > README.txt <<- "EOF"
           Flare: Empyrean Campaign - Traditional Chinese Web Version
           ==========================================================
+          Default language: zh_TW (Traditional Chinese)
 
-          HOW TO DEPLOY
-            Copy all files in this directory to your web server directory.
-
-          REQUIRED APACHE CONFIG
+          APACHE CONFIG
             AddType application/wasm .wasm
             AddType application/octet-stream .data
 
-          IN-GAME LANGUAGE
-            After starting the game, go to Options -> Interface -> Language
-            and select zh_TW for Traditional Chinese.
-
           LICENSES
-            Flare Engine           - GPLv3
-            Empyrean Campaign data - CC-BY-SA 3.0
-            Traditional Chinese    - CC-BY-SA 3.0 (derived from upstream)
-
-          SOURCE
-            Engine: https://github.com/flareteam/flare-engine
-            Game:   https://github.com/flareteam/flare-game
+            Flare Engine - GPLv3 | Empyrean Campaign - CC-BY-SA 3.0
           EOF
-          echo "README.txt created"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
