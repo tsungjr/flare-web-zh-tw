@@ -113,6 +113,70 @@ jobs:
             exit 1
           fi
 
+      - name: Install Traditional Chinese font and fix font_settings
+        run: |
+          cd flare-game/mods/fantasycore
+
+          echo "=== 1. 下載 Noto Serif TC（繁體字型）==="
+          mkdir -p fonts
+          for w in 400 700; do
+            CSS=$(curl -s -H "User-Agent: Mozilla/5.0" \
+              "https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@${w}")
+            URL=$(echo "$CSS" | grep -oP 'url\(\Khttps://[^)]+\.ttf')
+            if [ -n "$URL" ]; then
+              if [ "$w" = "400" ]; then
+                curl -sL "$URL" -o fonts/NotoSerifTC-Regular.ttf
+                echo "  OK: NotoSerifTC-Regular.ttf ($(du -h fonts/NotoSerifTC-Regular.ttf | cut -f1))"
+              else
+                curl -sL "$URL" -o fonts/NotoSerifTC-Bold.ttf
+                echo "  OK: NotoSerifTC-Bold.ttf ($(du -h fonts/NotoSerifTC-Bold.ttf | cut -f1))"
+              fi
+            else
+              echo "  FAIL: 無法取得 weight $w 的 TTF"
+              exit 1
+            fi
+          done
+
+          echo ""
+          echo "=== 2. 修改 font_settings.txt：zh_TW 改用 TC ==="
+          python3 - << "PYEOF"
+          p = "engine/font_settings.txt"
+          s = open(p, encoding="utf-8").read()
+          for weight in ["Regular", "Bold"]:
+              s = s.replace(
+                  "style=zh_TW,NotoSerifSC-%s.ttf" % weight,
+                  "style=zh_TW,NotoSerifTC-%s.ttf" % weight
+              )
+          open(p, "w", encoding="utf-8").write(s)
+          print("  zh_TW -> NotoSerifTC")
+          PYEOF
+
+          echo ""
+          echo "=== 3. 驗證 ==="
+          grep "zh_TW" engine/font_settings.txt || true
+
+          echo ""
+          echo "=== 4. 移除不再需要的 NotoSerifSC（zh 也改指向 TC）==="
+          # zh（簡中）也改成 TC，這樣可以刪掉 14MB 的 SC
+          python3 - << "PYEOF"
+          p = "engine/font_settings.txt"
+          s = open(p, encoding="utf-8").read()
+          for weight in ["Regular", "Bold"]:
+              s = s.replace(
+                  "style=zh,NotoSerifSC-%s.ttf" % weight,
+                  "style=zh,NotoSerifTC-%s.ttf" % weight
+              )
+          open(p, "w", encoding="utf-8").write(s)
+          print("  zh -> NotoSerifTC")
+          PYEOF
+
+          rm -f fonts/NotoSerifSC-Regular.ttf fonts/NotoSerifSC-Bold.ttf
+          echo "  已移除 NotoSerifSC"
+
+          echo ""
+          echo "=== 5. 最終字型清單 ==="
+          ls -lah fonts/
+
       - name: Setup Emscripten
         uses: mymindstorm/setup-emsdk@v14
         with:
