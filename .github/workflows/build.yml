@@ -1,4 +1,4 @@
-﻿name: Build Flare Web (zh-TW)
+name: Build Flare Web (zh-TW, optimized)
 
 on:
   workflow_dispatch:
@@ -11,6 +11,14 @@ on:
         description: 'flare-game 分支/標籤'
         required: false
         default: 'master'
+      keep_music:
+        description: '保留音樂 (true/false)'
+        required: false
+        default: 'true'
+      keep_other_languages:
+        description: '保留其他語言翻譯 (true/false)'
+        required: false
+        default: 'false'
 
 permissions:
   contents: write
@@ -29,47 +37,132 @@ jobs:
           path: flare-engine
           submodules: false
 
-      - name: Checkout flare-game (game data)
+      - name: Checkout flare-game
         uses: actions/checkout@v4
         with:
           repository: flareteam/flare-game
           ref: ${{ github.event.inputs.game_ref || 'master' }}
           path: flare-game
 
-      - name: Verify zh_TW translation present
+      - name: Show translation status
         run: |
-          echo "=== 確認繁中翻譯檔 ==="
+          echo "=== 繁中翻譯檔 ==="
           ls -la flare-game/mods/fantasycore/languages/data.zh_TW.po || true
           ls -la flare-game/mods/empyrean_campaign/languages/data.zh_TW.po || true
+          echo ""
+          echo "=== 引擎繁中翻譯 ==="
           ls -la flare-engine/mods/default/languages/engine.zh_TW.po || true
+          echo ""
+          echo "=== 各 mod 大小（精簡前）==="
+          du -sh flare-game/mods/* 2>/dev/null || true
+
+      - name: Optimize game data (remove unneeded files)
+        run: |
+          cd flare-game/mods
+
+          echo "=== 1. 移除不需要的 mod（只保留 fantasycore + empyrean_campaign）==="
+          for m in alpha_demo devlab minicore minicore_alpha centered_statbars; do
+            if [ -d "$m" ]; then
+              echo "  移除 $m"
+              rm -rf "$m"
+            fi
+          done
+
+          echo ""
+          echo "=== 2. 移除非中文語言檔 ==="
+          if [ "${{ github.event.inputs.keep_other_languages }}" != "true" ]; then
+            BEFORE=$(du -sm . | cut -f1)
+            find . -path "*/languages/*.po" -type f \
+              ! -name "*.zh_TW.po" ! -name "*.zh.po" ! -name "*.pot" \
+              -print -delete | head -100
+            find . -path "*/languages/*.po" -type f \
+              ! -name "*.zh_TW.po" ! -name "*.zh.po" ! -name "*.pot" -delete
+            AFTER=$(du -sm . | cut -f1)
+            echo "  語言檔精簡: ${BEFORE}MB -> ${AFTER}MB"
+          fi
+
+          echo ""
+          echo "=== 3. 移除不需要的字型（韓文最肥）==="
+          for f in NotoSerifKR-Regular.ttf NotoSerifDevanagari-Regular.ttf NotoSerifThai-Regular.ttf; do
+            FOUND=$(find . -name "$f" -type f)
+            if [ -n "$FOUND" ]; then
+              echo "  移除 $f"
+              find . -name "$f" -type f -delete
+            fi
+          done
+
+          echo ""
+          echo "=== 4. 音樂處理 ==="
+          if [ "${{ github.event.inputs.keep_music }}" != "true" ]; then
+            echo "  移除所有音樂"
+            find . -path "*/music/*" -type f -delete
+          else
+            echo "  保留音樂"
+          fi
+
+          echo ""
+          echo "=== 精簡後各 mod 大小 ==="
+          du -sh ./* 2>/dev/null || true
+          echo ""
+          echo "總計: $(du -sm . | cut -f1) MB"
 
       - name: Setup Emscripten
         uses: mymindstorm/setup-emsdk@v14
         with:
           version: 3.1.64
 
-      - name: Show emcc version
-        run: emcc --version
-
       - name: Build web version
         working-directory: flare-engine
         run: |
           chmod +x distribution/emscripten/make_emscripten.sh
+          # 官方腳本會偵測 ../flare-game 並複製 fantasycore + empyrean_campaign
           bash distribution/emscripten/make_emscripten.sh ../flare-game
         timeout-minutes: 60
 
-      - name: Inspect output
+      - name: Post-build optimize (壓縮可壓縮的資源)
         run: |
-          echo "=== 產物 ==="
-          ls -lah flare-engine/emscripten/ || true
+          cd flare-engine/emscripten
+          echo "=== 編譯後產物 ==="
+          ls -lah
           echo ""
-          echo "=== 大小 ==="
-          du -sh flare-engine/emscripten/* 2>/dev/null || true
+          echo "=== 大小統計 ==="
+          du -sh index.* 2>/dev/null
+
+      - name: Inject zh-TW defaults
+        run: |
+          cd flare-engine/emscripten
+          # 讓預設語言就是正體中文
+          if [ -f index.html ]; then
+            echo "=== 修改 index.html 預設語言 ==="
+            # 在 head 加入提示
+            grep -q 'lang=' index.html && sed -i 's/<html[^>]*>/<html lang="zh-Hant">/' index.html || true
+            grep -c 'zh' index.html || true
+          fi
+          # 建立說明檔
+          cat > README.txt <<'EOF'
+Flare: Empyrean Campaign — 繁體中文網頁版
+==========================================
+
+部署方式：
+  把本目錄所有檔案放到網站目錄即可。
+
+必要設定（Apache）：
+  AddType application/wasm .wasm
+  AddType application/octet-stream .data
+
+首次進入遊戲後，請在 Options -> Interface -> Language 選擇「正體中文」。
+
+授權：
+  引擎 Flare Engine — GPLv3
+  遊戲資料 Flare: Empyrean Campaign — CC-BY-SA 3.0
+  繁中翻譯 — CC-BY-SA 3.0（衍生自上游）
+EOF
+          echo "已建立 README.txt"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: flare-web
+          name: flare-web-zh-tw
           path: flare-engine/emscripten/
           retention-days: 30
           if-no-files-found: error
