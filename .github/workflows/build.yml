@@ -84,17 +84,19 @@ jobs:
               raise SystemExit(1)
           print("  OK: language -> zh_TW")
 
-          # setup_language: "0" -> "1"（跳過語言選擇對話框）
+          # setup_language 保持 "0"：首次啟動顯示語言選擇對話框
+          # GameStateTitle.cpp 行 154：!setup_language 時顯示 MenuConfirm
+          # 對話框會自動預選 settings->language（zh_TW），玩家按確定即可
           before2 = s
           s = re.sub(
-              r'(setConfigDefault\(53,\s*"setup_language",\s*&typeid\(setup_language\),\s*)"0"',
-              r'\1"1"',
+              r'(setConfigDefault\(53,\s*"setup_language",\s*&typeid\(setup_language\),\s*)"1"',
+              r'\1"0"',
               s
           )
           if s != before2:
-              print("  OK: setup_language -> 1")
+              print("  OK: setup_language -> 0 (show language dialog)")
           else:
-              print("  WARN: setup_language 未修改（非致命）")
+              print("  OK: setup_language already 0")
 
           open(p, "w", encoding="utf-8").write(s)
           PYEOF
@@ -107,9 +109,15 @@ jobs:
           echo ""
           echo "=== 最終驗證 ==="
           if grep -q 'setConfigDefault(17, "language".*"zh_TW"' src/Settings.cpp; then
-            echo "  ✅ language default = zh_TW"
+            echo "  OK: language default = zh_TW"
           else
-            echo "  ❌ 驗證失敗"
+            echo "  FAIL: language default 未修改"
+            exit 1
+          fi
+          if grep -q 'setConfigDefault(53, "setup_language".*"0"' src/Settings.cpp; then
+            echo "  OK: setup_language = 0（首次進入顯示語言選單）"
+          else
+            echo "  FAIL: setup_language 未設為 0"
             exit 1
           fi
 
