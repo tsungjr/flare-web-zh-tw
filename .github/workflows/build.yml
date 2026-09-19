@@ -63,15 +63,41 @@ jobs:
           cd flare-engine
           echo "=== BEFORE ==="
           grep -n 'setConfigDefault(17' src/Settings.cpp || true
-          grep -n 'setup_language' src/Settings.cpp || true
 
           echo ""
-          echo "=== 修改 language 預設值 en -> zh_TW ==="
-          sed -i 's/\(setConfigDefault(17, "language",[^,]*,[^,]*, *\)"en"/\1"zh_TW"/' src/Settings.cpp
+          echo "=== 用 Python 精確修改 language 預設值 ==="
+          python3 - << "PYEOF"
+          import re
+          p = "src/Settings.cpp"
+          s = open(p, encoding="utf-8").read()
 
-          echo ""
-          echo "=== 修改 setup_language 預設值 0 -> 1（跳過語言對話框）==="
-          sed -i 's/\(setConfigDefault(53, "setup_language",[^,]*,[^,]*, *\)"0"/\1"1"/' src/Settings.cpp
+          # 行 89 格式：
+          # setConfigDefault(17, "language",  &typeid(language),  "en",  &language,  "...");
+          before = s
+          s = re.sub(
+              r'(setConfigDefault\(17,\s*"language",\s*&typeid\(language\),\s*)"en"',
+              r'\1"zh_TW"',
+              s
+          )
+          if s == before:
+              print("  FAIL: language 未修改")
+              raise SystemExit(1)
+          print("  OK: language -> zh_TW")
+
+          # setup_language: "0" -> "1"（跳過語言選擇對話框）
+          before2 = s
+          s = re.sub(
+              r'(setConfigDefault\(53,\s*"setup_language",\s*&typeid\(setup_language\),\s*)"0"',
+              r'\1"1"',
+              s
+          )
+          if s != before2:
+              print("  OK: setup_language -> 1")
+          else:
+              print("  WARN: setup_language 未修改（非致命）")
+
+          open(p, "w", encoding="utf-8").write(s)
+          PYEOF
 
           echo ""
           echo "=== AFTER ==="
@@ -79,11 +105,11 @@ jobs:
           grep -n 'setConfigDefault(53' src/Settings.cpp || true
 
           echo ""
-          echo "=== 驗證修改成功 ==="
+          echo "=== 最終驗證 ==="
           if grep -q 'setConfigDefault(17, "language".*"zh_TW"' src/Settings.cpp; then
-            echo "  OK: language default = zh_TW"
+            echo "  ✅ language default = zh_TW"
           else
-            echo "  FAIL: language default 未修改"
+            echo "  ❌ 驗證失敗"
             exit 1
           fi
 
