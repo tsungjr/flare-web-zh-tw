@@ -1,0 +1,75 @@
+﻿name: Build Flare Web (zh-TW)
+
+on:
+  workflow_dispatch:
+    inputs:
+      engine_ref:
+        description: 'flare-engine 分支/標籤'
+        required: false
+        default: 'master'
+      game_ref:
+        description: 'flare-game 分支/標籤'
+        required: false
+        default: 'master'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout flare-engine
+        uses: actions/checkout@v4
+        with:
+          repository: flareteam/flare-engine
+          ref: ${{ github.event.inputs.engine_ref || 'master' }}
+          path: flare-engine
+          submodules: false
+
+      - name: Checkout flare-game (game data)
+        uses: actions/checkout@v4
+        with:
+          repository: flareteam/flare-game
+          ref: ${{ github.event.inputs.game_ref || 'master' }}
+          path: flare-game
+
+      - name: Verify zh_TW translation present
+        run: |
+          echo "=== 確認繁中翻譯檔 ==="
+          ls -la flare-game/mods/fantasycore/languages/data.zh_TW.po || true
+          ls -la flare-game/mods/empyrean_campaign/languages/data.zh_TW.po || true
+          ls -la flare-engine/mods/default/languages/engine.zh_TW.po || true
+
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 3.1.64
+
+      - name: Show emcc version
+        run: emcc --version
+
+      - name: Build web version
+        working-directory: flare-engine
+        run: |
+          chmod +x distribution/emscripten/make_emscripten.sh
+          bash distribution/emscripten/make_emscripten.sh ../flare-game
+        timeout-minutes: 60
+
+      - name: Inspect output
+        run: |
+          echo "=== 產物 ==="
+          ls -lah flare-engine/emscripten/ || true
+          echo ""
+          echo "=== 大小 ==="
+          du -sh flare-engine/emscripten/* 2>/dev/null || true
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: flare-web
+          path: flare-engine/emscripten/
+          retention-days: 30
+          if-no-files-found: error
